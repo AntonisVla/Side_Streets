@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
+from .models import PlaceInput
+
 app = FastAPI(title="Side Streets")
 
 PLACES = [
@@ -44,8 +46,6 @@ PLACES = [
     },
 ]
 
-CATEGORIES = ["Coffee & bites", "Art & culture", "Outdoors", "Little shops"]
-
 
 @app.get("/api/health")
 def health():
@@ -54,24 +54,27 @@ def health():
 
 @app.get("/api/places")
 def list_places(q: str = "", category: str | None = None):
-    """Return places, optionally filtered by search text and/or category."""
     search_text = q.strip().casefold()
-    matching = []
+    matching_places = []
 
     for place in PLACES:
         if category is not None and place["category"] != category:
             continue
 
-        searchable = " ".join(
-            [place["name"], place["neighborhood"], place["description"]]
+        searchable_text = " ".join(
+            [
+                place["name"],
+                place["neighborhood"],
+                place["description"],
+            ]
         ).casefold()
 
-        if search_text and search_text not in searchable:
+        if search_text and search_text not in searchable_text:
             continue
 
-        matching.append(place)
+        matching_places.append(place)
 
-    return matching  
+    return matching_places
 
 
 @app.get("/api/places/{place_id}")
@@ -79,4 +82,57 @@ def get_place(place_id: int):
     for place in PLACES:
         if place["id"] == place_id:
             return place
-    raise HTTPException(status_code=404, detail="This place does not exist.")
+
+    raise HTTPException(
+        status_code=404,
+        detail="This place does not exist.",
+    )
+
+
+@app.post("/api/places", status_code=201)
+def create_place(place: PlaceInput):
+    next_id = max(
+        (place["id"] for place in PLACES),
+        default=0,
+    ) + 1
+
+    new_place = place.model_dump()
+
+    new_place["id"] = next_id
+    new_place["shortlisted"] = False
+
+    PLACES.append(new_place)
+
+    return new_place
+
+
+@app.put("/api/places/{place_id}")
+def update_place(place_id: int, data: PlaceInput):
+    for index, place in enumerate(PLACES):
+        if place["id"] == place_id:
+            updated_place = data.model_dump()
+
+            updated_place["id"] = place_id
+            updated_place["shortlisted"] = place["shortlisted"]
+
+            PLACES[index] = updated_place
+
+            return updated_place
+
+    raise HTTPException(
+        status_code=404,
+        detail="This place does not exist.",
+    )
+
+
+@app.delete("/api/places/{place_id}", status_code=204)
+def delete_place(place_id: int):
+    for index, place in enumerate(PLACES):
+        if place["id"] == place_id:
+            PLACES.pop(index)
+            return
+
+    raise HTTPException(
+        status_code=404,
+        detail="This place does not exist.",
+    )
