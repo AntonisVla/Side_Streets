@@ -5,7 +5,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATABASE_PATH = PROJECT_ROOT / "data" / "learning.db"
 
 if not DATABASE_PATH.exists():
-    raise SystemExit("Run scripts/create_db.py first")
+    raise SystemExit("Run scripts/create_learning_db.py first")
 
 connection = sqlite3.connect(DATABASE_PATH)
 
