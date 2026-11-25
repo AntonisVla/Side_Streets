@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 Category = Literal[
     "Coffee & bites",
@@ -21,3 +21,13 @@ class PlaceInput(BaseModel):
     address: str = Field(min_length=3, max_length=120)
     description: str = Field(min_length=20, max_length=1000)
     tip: str = Field(min_length=5, max_length=400)
+
+
+class Place(PlaceInput):
+    id: int
+    shortlisted: bool
+
+
+class ShortlistInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    shortlisted: StrictBool
