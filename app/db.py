@@ -7,15 +7,27 @@ APP_DIRECTORY = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_DIRECTORY.parent
 DATABASE_PATH = PROJECT_ROOT / "data" / "side_streets.db"
 
-COLUMNS = "id, name, category, neighborhood, address, description, tip, shortlisted"
+SELECT_PLACE = """
+    SELECT
+        places.id,
+        places.name,
+        places.category,
+        places.neighborhood,
+        places.address,
+        places.description,
+        places.tip,
+        shortlist.place_id IS NOT NULL AS shortlisted
+    FROM places
+    LEFT JOIN shortlist ON shortlist.place_id = places.id
+"""
 EDITABLE = ("name", "category", "neighborhood", "address", "description", "tip")
 
 
 @contextmanager
 def connect():
-    """Open a connection; commit on success, roll back on error, always close."""
     connection = sqlite3.connect(DATABASE_PATH, timeout=10)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
 
     try:
         with connection:
@@ -30,8 +42,16 @@ def to_place(row):
     return place
 
 
+def fetch_place(connection, place_id: int):
+    row = connection.execute(
+        SELECT_PLACE + " WHERE places.id = ?",
+        (place_id,),
+    ).fetchone()
+
+    return None if row is None else to_place(row)
+
+
 def initialize():
-    """Create missing tables and insert the sample places only once."""
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     schema = (APP_DIRECTORY / "schema.sql").read_text(encoding="utf-8")
 
@@ -65,13 +85,12 @@ def initialize():
 
 
 def list_places(q: str = "", category: str | None = None):
-    """Return places matching the optional text and category filters."""
-    sql = f"SELECT {COLUMNS} FROM places"
+    sql = SELECT_PLACE
     conditions = []
     parameters = []
 
     if category is not None:
-        conditions.append("category = ?")
+        conditions.append("places.category = ?")
         parameters.append(category)
 
     search_text = q.strip()
@@ -80,7 +99,7 @@ def list_places(q: str = "", category: str | None = None):
         conditions.append(
             """
             instr(
-                lower(name || ' ' || neighborhood || ' ' || description),
+                lower(places.name || ' ' || places.neighborhood || ' ' || places.description),
                 lower(?)
             ) > 0
             """
@@ -90,7 +109,7 @@ def list_places(q: str = "", category: str | None = None):
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)
 
-    sql += " ORDER BY id"
+    sql += " ORDER BY places.id"
 
     with connect() as connection:
         rows = connection.execute(sql, parameters).fetchall()
@@ -98,18 +117,11 @@ def list_places(q: str = "", category: str | None = None):
 
 
 def get_place(place_id: int):
-    """Return a place dictionary, or None if the ID does not exist."""
     with connect() as connection:
-        row = connection.execute(
-            f"SELECT {COLUMNS} FROM places WHERE id = ?",
-            (place_id,),
-        ).fetchone()
-
-        return None if row is None else to_place(row)
+        return fetch_place(connection, place_id)
 
 
 def create_place(data: dict):
-    """Insert a place and return its stored content."""
     with connect() as connection:
         cursor = connection.execute(
             f"""
@@ -119,16 +131,10 @@ def create_place(data: dict):
             [data[field] for field in EDITABLE],
         )
 
-        row = connection.execute(
-            f"SELECT {COLUMNS} FROM places WHERE id = ?",
-            (cursor.lastrowid,),
-        ).fetchone()
-
-        return to_place(row)
+        return fetch_place(connection, cursor.lastrowid)
 
 
 def update_place(place_id: int, data: dict):
-    """Replace a place's editable fields, or return None if it is missing."""
     with connect() as connection:
         cursor = connection.execute(
             f"""
@@ -142,16 +148,10 @@ def update_place(place_id: int, data: dict):
         if cursor.rowcount == 0:
             return None
 
-        row = connection.execute(
-            f"SELECT {COLUMNS} FROM places WHERE id = ?",
-            (place_id,),
-        ).fetchone()
-
-        return to_place(row)
+        return fetch_place(connection, place_id)
 
 
 def delete_place(place_id: int):
-    """Return True if a place was deleted, or False if it was missing."""
     with connect() as connection:
         cursor = connection.execute(
             "DELETE FROM places WHERE id = ?",
@@ -159,6 +159,38 @@ def delete_place(place_id: int):
         )
 
         return cursor.rowcount > 0
+
+
+def list_shortlist():
+    with connect() as connection:
+        rows = connection.execute(
+            SELECT_PLACE
+            + " WHERE shortlist.place_id IS NOT NULL ORDER BY places.id"
+        ).fetchall()
+
+        return [to_place(row) for row in rows]
+
+
+def set_shortlisted(place_id: int, shortlisted: bool):
+    with connect() as connection:
+        place = fetch_place(connection, place_id)
+
+        if place is None:
+            return None
+
+        if shortlisted and not place["shortlisted"]:
+            connection.execute(
+                "INSERT INTO shortlist (place_id) VALUES (?)",
+                (place_id,),
+            )
+
+        if not shortlisted:
+            connection.execute(
+                "DELETE FROM shortlist WHERE place_id = ?",
+                (place_id,),
+            )
+
+        return fetch_place(connection, place_id)
 
 
 if __name__ == "__main__":
